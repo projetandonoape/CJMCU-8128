@@ -1,0 +1,182 @@
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         /* ESP32
+    Sensor CJMCU-8128 mit:
+    CCS811 -> 0x5A !!!
+      bool begin()
+      bool start(mode)
+      read(eco2, etvoc, errstat, raw)
+      int hardware_version()
+      int bootloader_version()
+      int application_version()
+      int get_errorid()
+      bool set_envdate(t,h)
+      bool set_envdata210(t,h)
+      bool get_baseline(baseline)
+      bool set_baseline(baseline)
+      bool flash(image, size)
+      set_i2cdelay(us)
+      get_i2cdelay(us)
+      wake_init()
+      wake_up()
+      wake_down()
+    SI7021 -> 0x40
+      float readHumidity()
+      float readTemperature()
+      _readRevision
+      readSerialNumber()
+      reset()
+    BMP280 -> 0x76
+      bool (begin(addr)
+      setSampling(mode)
+      readCoefficients()
+      float readTemperature()
+      float readPressure()
+      float readAltitude(seaLevelhPa)
+      float seaLevelForAltitude
+      takeForcedMeasurement()
+*/
+
+
+#include "ccs811.h"                     // include library for CCS811 - Sensor from martin-pennings https://github.com/maarten-pennings/CCS811
+#include "ClosedCube_HDC1080.h"
+#include "Adafruit_BMP280.h"            // include main library for BMP280 - Sensor
+#include <Wire.h>                       // This library allows you to communicate with I2C
+
+#include "Adafruit_Si7021.h"
+Adafruit_Si7021 Si7021 = Adafruit_Si7021();
+#include <U8g2lib.h>  //biblioteca da tela OLED
+U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE); //instancia o módulo de tela OLED
+
+CCS811 ccs811;
+Adafruit_BMP280 bmp280;                // I2C
+ClosedCube_HDC1080 hdc1080;
+
+void setup() {
+  Serial.begin(115200);
+  // Enable I2C
+
+  u8g2.begin();               //inicializa display
+  //Wire.begin(21,22);                  // make TTGO boards run with this code
+  Serial.println("CCS811 test");      /* --- SETUP CCS811 on 0x5A ------ */
+
+  if (!Si7021.begin()) {
+    Serial.println("Did not find Si7021 sensor!");
+  } else {
+    Serial.print("Found model ");
+    switch(Si7021.getModel()) {
+      case SI_Engineering_Samples:
+        Serial.print("SI engineering samples"); break;
+      case SI_7013:
+        Serial.print("Si7013"); break;
+      case SI_7020:
+        Serial.print("Si7020"); break;
+      case SI_7021:
+        Serial.print("Si7021"); break;
+      case SI_UNKNOWN:
+      default:
+      Serial.print("Unknown");
+    }
+  }
+  Serial.print(" Rev(");
+  Serial.print(Si7021.getRevision());
+  Serial.print(")");
+  Serial.print(" Serial #"); Serial.print(Si7021.sernum_a, HEX); Serial.println(Si7021.sernum_b, HEX);
+  
+  if (!hdc1080.begin(0x40)) {
+    Serial.println("********");
+    //hdc1080.reset();
+    delay(500);
+  }
+  printRegister(hdc1080.readRegister());
+  
+  ccs811.set_i2cdelay(50); // Needed for ESP8266 because it doesn't handle I2C clock stretch correctly
+  if (!ccs811.begin()) {
+    Serial.println("Failed to start sensor! Please check your wiring.");
+    while (true);
+  }
+  // Print CCS811 versions
+  Serial.print("setup: hardware    version: "); Serial.println(ccs811.hardware_version(), HEX);
+  Serial.print("setup: bootloader  version: "); Serial.println(ccs811.bootloader_version(), HEX);
+  Serial.print("setup: application version: "); Serial.println(ccs811.application_version(), HEX);
+
+  // Start measuring
+  bool ok = ccs811.start(CCS811_MODE_1SEC);
+  //bool ok = ccs811.start(CCS811_MODE_IDLE);
+  if ( !ok ) Serial.println("setup: CCS811 start FAILED");
+
+  Serial.println("BMP280 test");     /* --- SETUP BMP on 0x76 ------ */
+  if (!bmp280.begin(0x76)) {
+    Serial.println("Could not find a valid BMP280 sensor, check wiring!");
+    while (true);
+  }
+  
+
+
+}
+
+void loop() {
+  Serial.print("BMP280 => Temperature = ");
+  Serial.print(bmp280.readTemperature());
+  Serial.print(" °C, ");
+
+  Serial.print("Pressure = ");
+  Serial.print(bmp280.readPressure() / 100);
+  Serial.println(" Pa, ");
+
+  //  Serial.print("Approx altitude = ");
+  //  Serial.print(bmp280.readAltitude(1013.25));        /* Adjusted to local forecast! */
+  //  Serial.println(" m");
+  
+  Serial.print("T=");
+  Serial.print(hdc1080.readTemperature());
+  Serial.print("C, RH=");
+  Serial.print(hdc1080.readHumidity());
+  Serial.println("%");
+  uint16_t eco2, etvoc, errstat, raw;     // Read CCS811
+
+  ccs811.set_envdata(bmp280.readTemperature(), hdc1080.readHumidity());
+  ccs811.read(&eco2, &etvoc, &errstat, &raw);
+  if ( errstat == CCS811_ERRSTAT_OK ) {
+    Serial.print("CCS811 => CO2 = ");
+    Serial.print(eco2);
+    Serial.print("ppm, TVOC = ");
+    Serial.println(etvoc);
+  }
+
+  Serial.print("Humidity (Si7021):    ");
+  Serial.print(Si7021.readHumidity(), 2);
+  Serial.print("\tTemperature: ");
+  Serial.println(Si7021.readTemperature(), 2);
+  delay(1000);
+  
+  delay(5000);
+
+}
+
+void printRegister(HDC1080_Registers reg) {
+  Serial.println("HDC1080 Configuration Register");
+  Serial.println("------------------------------");
+  
+  Serial.print("Software reset bit: ");
+  Serial.print(reg.SoftwareReset, BIN);
+  Serial.println(" (0=Normal Operation, 1=Software Reset)");
+
+  Serial.print("Heater: ");
+  Serial.print(reg.Heater, BIN);
+  Serial.println(" (0=Disabled, 1=Enabled)");
+
+  Serial.print("Mode of Acquisition: ");
+  Serial.print(reg.ModeOfAcquisition, BIN);
+  Serial.println(" (0=T or RH is acquired, 1=T and RH are acquired in sequence, T first)");
+
+  Serial.print("Battery Status: ");
+  Serial.print(reg.BatteryStatus, BIN);
+  Serial.println(" (0=Battery voltage > 2.8V, 1=Battery voltage < 2.8V)");
+
+  Serial.print("T Measurement Resolution: ");
+  Serial.print(reg.TemperatureMeasurementResolution, BIN);
+  Serial.println(" (0=14 bit, 1=11 bit)");
+
+  Serial.print("RH Measurement Resolution: ");
+  Serial.print(reg.HumidityMeasurementResolution, BIN);
+  Serial.println(" (00=14 bit, 01=11 bit, 10=8 bit)");
+}
